@@ -2192,7 +2192,7 @@ var CGUI = function()
     mJammer.updateInstr(instrI);
   };
 
-  var updateSongSpeed = function () {
+  var bpmOnBlur = function () {
     // Determine song speed
     var element = document.getElementById("bpm");
     var bpm = parseInt(element.value);
@@ -2200,7 +2200,7 @@ var CGUI = function()
     element.value = mSong.getBpm();      
   };
 
-  var updatePatternLength = function () {
+  var rppOnBlur = function () {
     var element = document.getElementById("rpp");
     var rpp = parseInt(element.value);    
     mSong.setPatternLength(rpp);              
@@ -3057,36 +3057,14 @@ var CGUI = function()
     }    
   });  
 
-  var osc1WaveMouseDown = preventDefault(function (e) {
-    if (!e) var e = window.event;
-    var o = getEventElement(e);
-    var wave = 0;
-    if (o.id === "osc1_wave_sin") wave = 0;
-    else if (o.id === "osc1_wave_sqr") wave = 1;
-    else if (o.id === "osc1_wave_saw") wave = 2;
-    else if (o.id === "osc1_wave_tri") wave = 3;
-    updateFxOrInstr(OSC1_WAVEFORM,wave);   
-  });
-
-  var osc2WaveMouseDown = preventDefault(function (e) {    
-    var o = getEventElement(e);
-    var wave = 0;
-    if (o.id === "osc2_wave_sin") wave = 0;
-    else if (o.id === "osc2_wave_sqr") wave = 1;
-    else if (o.id === "osc2_wave_saw") wave = 2;
-    else if (o.id === "osc2_wave_tri") wave = 3;
-    updateFxOrInstr(OSC2_WAVEFORM,wave);    
-  });
-
-  var lfoWaveMouseDown = preventDefault(function (e) {
-    var o = getEventElement(e);
-    var wave = 0;
-    if (o.id === "lfo_wave_sin") wave = 0;
-    else if (o.id === "lfo_wave_sqr") wave = 1;
-    else if (o.id === "lfo_wave_saw") wave = 2;
-    else if (o.id === "lfo_wave_tri") wave = 3;
-    updateFxOrInstr(LFO_WAVEFORM,wave);
-  });
+  var waveMouseDown = function(cmd,mapping) {
+    return preventDefault(function(e) {
+      var o = getEventElement(e);
+      var wave = mapping[o.id];  
+      wave = wave ? wave : 0;
+      updateFxOrInstr(cmd,wave);   
+    });
+  }
 
   var fxFiltMouseDown = preventDefault(function (e) {
     if (!e) var e = window.event;    
@@ -3803,8 +3781,9 @@ var CGUI = function()
     document.getElementById("stopPlaying").onmousedown = stopPlaying;
     document.getElementById("about").onmousedown = about;
     document.getElementById("bpm").onfocus = setEditModeNone;
+    document.getElementById("bpm").onblur = bpmOnBlur;
     document.getElementById("rpp").onfocus = setEditModeNone;
-    document.getElementById("rpp").onblur = updatePatternLength;
+    document.getElementById("rpp").onblur = rppOnBlur;
 
     document.getElementById("sequencerCopy").onmousedown = preventDefault(mSeq.copy);
     document.getElementById("sequencerPaste").onmousedown = preventDefault(mSeq.paste);
@@ -3853,6 +3832,8 @@ var CGUI = function()
     document.getElementById("instrPreset").onchange = selectPreset;
     document.getElementById("instrPreset").onkeydown = presetOnKeyDown;
     
+    var osc1mapping = {osc1_wave_sin:0,osc1_wave_sqr: 1,osc1_wave_saw:2,osc1_wave_tri:3};
+    var osc1WaveMouseDown = waveMouseDown(OSC1_WAVEFORM,osc1mapping);
     document.getElementById("osc1_wave_sin").addEventListener("mousedown", osc1WaveMouseDown, false);
     document.getElementById("osc1_wave_sin").addEventListener("touchstart", osc1WaveMouseDown, false);
     document.getElementById("osc1_wave_sqr").addEventListener("mousedown", osc1WaveMouseDown, false);
@@ -3867,6 +3848,9 @@ var CGUI = function()
     document.getElementById("osc1_semi").addEventListener("touchstart", sliderMouseDown, false);
     document.getElementById("osc1_xenv").addEventListener("mousedown", boxMouseDown, false);
     document.getElementById("osc1_xenv").addEventListener("touchstart", boxMouseDown, false);
+
+    var osc2mapping = {osc2_wave_sin:0,osc2_wave_sqr: 1,osc2_wave_saw:2,osc2_wave_tri:3};
+    var osc2WaveMouseDown = waveMouseDown(OSC2_WAVEFORM,osc2mapping);
     document.getElementById("osc2_wave_sin").addEventListener("mousedown", osc2WaveMouseDown, false);
     document.getElementById("osc2_wave_sin").addEventListener("touchstart", osc2WaveMouseDown, false);
     document.getElementById("osc2_wave_sqr").addEventListener("mousedown", osc2WaveMouseDown, false);
@@ -3897,6 +3881,9 @@ var CGUI = function()
     document.getElementById("arp_note2").addEventListener("touchstart", sliderMouseDown, false);
     document.getElementById("arp_speed").addEventListener("mousedown", sliderMouseDown, false);
     document.getElementById("arp_speed").addEventListener("touchstart", sliderMouseDown, false);
+
+    var lfomapping = {lfo_wave_sin:0,lfo_wave_sqr: 1,lfo_wave_saw:2,lfo_wave_tri:3};
+    var lfoWaveMouseDown = waveMouseDown(LFO_WAVEFORM,lfomapping);
     document.getElementById("lfo_wave_sin").addEventListener("mousedown", lfoWaveMouseDown, false);
     document.getElementById("lfo_wave_sin").addEventListener("touchstart", lfoWaveMouseDown, false);
     document.getElementById("lfo_wave_sqr").addEventListener("mousedown", lfoWaveMouseDown, false);
