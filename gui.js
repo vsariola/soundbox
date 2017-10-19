@@ -261,12 +261,21 @@ var CSong = function() {
     return mSong.rowLen;    
   }
 
-  this.setRowLength = function(value)
-  {
-    if (mSong.rowLen == value)
+  this.getBpm = function()
+  {    
+    return samplesPerRowToBpm(mSong.rowLen); 
+  }
+
+  this.setBpm = function(value)
+  {    
+    value = value|0;
+    if (value < 10 || value > 1000)   
+      return;    
+    var samplesPerRow = bpmToSamplesPerRow(value);
+    if (mSong.rowLen == samplesPerRow)
       return;
-    mSong.rowLen = value;    
-    this.rowLengthChanged.dispatch(value);
+    mSong.rowLen = samplesPerRow;    
+    this.bpmChanged.dispatch(value);
   }
 
   this.setInstrument = function(channel,value)
@@ -315,8 +324,12 @@ var CSong = function() {
 
   this.setPatternLength = function(length)
   {
+    length = length|0;
+    if (!length || length <= 1 || length >= 256)
+      return;  
     if (mSong.patternLen == length)
       return;
+
     // Truncate/extend patterns
     var i, j, k, col, notes, fx;
     for (i = 0; i < mSong.songData.length; i++) {
@@ -340,6 +353,7 @@ var CSong = function() {
         col.f = fx;
       }
     }
+    mSong.patternLen = length;
     this.patternLengthChanged.dispatch(length);
   }
   
@@ -389,7 +403,7 @@ var CSong = function() {
   }
 
   this.songChanged = new CSignal();
-  this.rowLengthChanged = new CSignal();
+  this.bpmChanged = new CSignal();
   this.patternChanged = new CSignal();
   this.instrumentChanged = new CSignal();
   this.instrumentPropertyChanged = new CSignal();
@@ -409,15 +423,14 @@ var CSong = function() {
 //   numcols() - returns the number of cols
 //   numrows() - returns the number of rows
 //   toHTML(value) - converts value (as returned by get) into HTML code
-//   getElementName(col,row) - returns the name of the DOM element corresponding to col/row
-//   getScrollElementName(row) - returns the name of the DOM element for scrolling to row
-//   scrollBar - name of the scroll bar. Note: property, not a method
 // 
 //------------------------------------------------------------------------------
 
-var CTableEditor = function() {
+var CTableEditor = function(scrollName,tableName,rowHeaderName,cellName) {
   var mCol=0,mRow=0,mCol1=0,mRow1=0,mCol2=0,mRow2=0;  
+  var mHighlightRow=-1;
   var mCopyBuffer = undefined;
+  var mSelecting = false;
   var mSuppressLevel = 0, updateRequested = false;
   
   var self = this;
@@ -493,6 +506,18 @@ var CTableEditor = function() {
     });
     self.resumeUpdate();
   }
+
+  this.setHighlightRow = function(highlightRow) {
+    if (mHighlightRow == highlightRow)
+      return;
+    mHighlightRow = highlightRow;
+    if (rowHeaderName) {
+      for (var i = 0; i < self.numrows(); ++i) {
+        var o = document.getElementById(getRowHeaderElementName(i));
+        o.className = (i == highlightRow ? "playpos" : "");
+      }
+    }
+  };
  
   this.isSingleSelected = function() {
     return mCol1 == mCol2 && mRow1 == mRow2;
@@ -526,14 +551,45 @@ var CTableEditor = function() {
   
   this.scrollIntoView = function(row) {
     // Scroll the row into view? (only when needed)    
-    var o = document.getElementById(self.getScrollElementName(row));
+    var o = document.getElementById(getScrollElementName(row));
     if (o.scrollIntoView) {
-      var so = document.getElementById(self.scrollBar);
+      var so = document.getElementById(scrollName);
       var oy = o.offsetTop - so.scrollTop;
       if (oy < 0 || (oy + 10) > so.offsetHeight)
         o.scrollIntoView(oy < 0);
     }    
   }
+
+  this.buildTable = function() {
+    var beatDistance = this.getBeatDistance();
+    var table = document.getElementById(tableName);
+    if (table.children.length === this.numrows() && getCurrentBeatDistance(table) === beatDistance)
+      return;
+    while (table.firstChild)
+      table.removeChild(table.firstChild);
+    var tr, th, td;
+    for (var row = 0; row < this.numrows(); row++) {
+      tr = document.createElement("tr");
+      if (beatDistance && row % beatDistance === 0)
+        tr.className = "beat";
+      if (rowHeaderName) {
+        th = document.createElement("th");      
+        th.id = getRowHeaderElementName(row);
+        th.textContent = "" + row;
+        tr.appendChild(th);        
+      }
+      for (col = 0; col < this.numcols(); col++) {
+        td = document.createElement("td");
+        td.id = getElementName(col,row);
+        td.textContent = " ";
+        td.addEventListener("mousedown", mouseDown, false);
+        td.addEventListener("mouseover", mouseOver, false);
+        td.addEventListener("mouseup", mouseUp, false);
+        tr.appendChild(td);
+      }
+      table.appendChild(tr);
+    }    
+  };
   
   this.update = function() {
     // if updates are currently supressed, request an update as soon
@@ -542,10 +598,11 @@ var CTableEditor = function() {
       updateRequested = true;
       return;
     }
-    updateRequested = false;
+    updateRequested = false;    
+    self.buildTable();
     for (var row = 0;row < self.numrows();++row) {
       for (var col = 0;col < self.numcols();++col) {
-        var o = document.getElementById(self.getElementName(col,row));       
+        var o = document.getElementById(getElementName(col,row));       
         var desiredHTML = self.toHTML(self.get(col,row));
         if (o.innerHTML != desiredHTML)
           o.innerHTML = desiredHTML;    
@@ -555,12 +612,12 @@ var CTableEditor = function() {
           o.className = desiredClassName;        
       }
     }
-  }   
+  };   
   
   this.suppressUpdate = function()
   {
     mSuppressLevel++;
-  }
+  };
   
   this.resumeUpdate = function()
   {
@@ -573,21 +630,21 @@ var CTableEditor = function() {
     if (mSuppressLevel <= 0 && updateRequested) {
       self.update();          
     }
-  }
+  };
   
   this.setSelectionCorner = function(col,row) {
     mCol1 = col;
     mRow1 = row;
     self.update();
     self.scrollIntoView(col,row);
-  }
+  };
   
   this.setSelectionCorner2 = function(col,row) {
     mCol2 = col;
     mRow2 = row;
     self.update();
     self.scrollIntoView(col,row);
-  }
+  };
   
   this.copy = function() {
     mCopyBuffer = [];
@@ -608,9 +665,73 @@ var CTableEditor = function() {
       for (var col = self.col(), j = 0; col < self.numcols() && j < mCopyBuffer[i].length; ++col, ++j)
         self.set(col,row,mCopyBuffer[i][j]);  
     self.resumeUpdate();
-  }
+  };
+
+  // Public signals
 
   this.cursorMove = new CSignal();  
+  this.mouseDown = new CSignal();  
+
+  // Private methods
+
+  var getCellCoord = function (e)
+  {
+    var element = getEventElement(e);
+    var rowSplit = element.id.indexOf('r', 2);
+    return {
+      col: parseInt(element.id.slice(2, rowSplit)),
+      row: parseInt(element.id.slice(rowSplit + 1))
+    };
+  };
+
+  var getCurrentBeatDistance = function (table) {
+    var beatDistance = 1;
+    while (beatDistance < table.children.length) {
+      if (table.children[beatDistance].className === "beat")
+        return beatDistance;
+      beatDistance++;
+    }
+    return 0;
+  };
+
+  var getElementName = function(col,row) {
+    return cellName + "c" + col + "r" + row;
+  };
+
+  var getScrollElementName = function(row) {
+    return cellName + "c0r" + row;
+  };
+  
+  var getRowHeaderElementName = function(row) {
+    return cellName + "h" + row;    
+  };
+
+  var mouseDown = preventDefault(function (e)
+  {     
+    var coord = getCellCoord(e);
+    self.setCursor(coord.col, coord.row);
+    mSelecting = true;      
+    self.mouseDown.dispatch(coord.col,coord.row);
+  });
+
+  var mouseOver = preventDefault(function (e)
+  {
+    if (mSelecting)
+    {
+      var coord = getCellCoord(e);
+      self.setSelectionCorner(coord.col, coord.row);
+    }
+  });
+
+  var mouseUp = preventDefault(function (e)
+  {
+    if (mSelecting)
+    {
+      var coord = getCellCoord(e);
+      self.setSelectionCorner(coord.col, coord.row);
+      mSelecting = false;
+    }
+  });
 };
 
 //------------------------------------------------------------------------------
@@ -628,6 +749,27 @@ var preventDefault = function (innerFunction) {
     e.preventDefault();
     innerFunction(e);
   };
+};
+
+var getEventElement = function (e)
+{
+  var o = null;
+  if (!e) var e = window.event;
+  if (e.target)
+    o = e.target;
+  else if (e.srcElement)
+    o = e.srcElement;
+  if (o.nodeType == 3) // defeat Safari bug
+    o = o.parentNode;
+  return o;
+};
+
+var bpmToSamplesPerRow = function (bpm) {
+  return Math.round((60 * 44100 / 4) / bpm);
+};
+
+var samplesPerRowToBpm = function (samplesPerRow) {
+  return Math.round((60 * 44100 / 4) / samplesPerRow);
 };
 
 //------------------------------------------------------------------------------
@@ -650,12 +792,9 @@ var CGUI = function()
   // Edit/gui state
   var mEditMode = EDIT_PATTERN,
       mKeyboardOctave = 4,
-      mPattern = new CTableEditor(),    
-      mSeq = new CTableEditor(),
-      mFxTrack = new CTableEditor(),      
-      mSelectingSeqRange = false,
-      mSelectingPatternRange = false,
-      mSelectingFxRange = false,
+      mPattern = new CTableEditor("pattern","pattern-table",true,"p"),    
+      mSeq = new CTableEditor("sequencer","sequencer-table",true,"s"),
+      mFxTrack = new CTableEditor("fxtrack","fxtrack-table",false,"f"),      
       mInstrCopyBuffer = [];
 
   // Parsed URL data
@@ -695,13 +834,13 @@ var CGUI = function()
   //--------------------------------------------------------------------------  
   
   mSong.songChanged.add(function (value) {
-    stopAudio();    
-    buildPatternTable();
-    buildFxTable();    
-    mSeq.update();    
-    mPattern.update();
+    stopAudio();        
+    mSeq.update();        
+    mPattern.update();    
     mFxTrack.update();    
     updateInstrument();    
+    document.getElementById("bpm").value = mSong.getBpm();
+    document.getElementById("rpp").value = mSong.getPatternLength();
   });
 
   mSong.patternChanged.add(function (col,row,value) {
@@ -728,15 +867,19 @@ var CGUI = function()
   mSong.instrumentChanged.add(function (value) { updateInstrument(); });
   mSong.instrumentPropertyChanged.add(function (value) { updateInstrument(); });
 
-  mSong.rowLengthChanged.add(function (rowlength) {
+  mSong.bpmChanged.add(function (bpm) {
     stopAudio();
-    mJammer.updateRowLen(rowlength);
+    mJammer.updateRowLen(mSong.getRowLength());
+    mPattern.update(); 
+    mFxTrack.update(); 
+    document.getElementById("bpm").value = bpm;
   })
 
   mSong.patternLengthChanged.add(function (patternLength) {
-    stopAudio();
-    buildPatternTable();
-    buildFxTable();    
+    stopAudio();   
+    document.getElementById("rpp").value = patternLength;
+    mPattern.update(); 
+    mFxTrack.update(); 
   });
 
   mSong.instrumentChanged.add(function (channel,value) {
@@ -762,15 +905,13 @@ var CGUI = function()
       return "&nbsp;";  
   };
 
-  mSeq.getElementName = function(col,row) {
-    return "sc" + col + "r" + row;
-  };
+  mSeq.mouseDown.add(function() {
+    setEditMode(EDIT_SEQUENCE);
+  });
 
-  mSeq.getScrollElementName = function(row) {
-    return "spr" + row;
+  mSeq.getBeatDistance = function() {
+    return 0;
   };
-
-  mSeq.scrollBar = "sequencer";
 
   mPattern.get = function(col,row) {
     return mSong.getNote(mSeq.col(),mSeq.getCurrent(),col,row);
@@ -791,15 +932,13 @@ var CGUI = function()
       return "&nbsp;";  
   };
 
-  mPattern.getElementName = function(col,row) {
-    return "pc" + col + "r" + row;
-  };
+  mPattern.mouseDown.add(function() {
+    setEditMode(EDIT_PATTERN);
+  });
 
-  mPattern.getScrollElementName = function(row) {
-    return "pc0r" + row;
+  mPattern.getBeatDistance = function() {
+    return getBeatDistance();
   };
-
-  mPattern.scrollBar = "pattern";
 
   mFxTrack.get = function(col,row) {
     return mSong.getFx(mSeq.col(),mSeq.getCurrent(),row);   
@@ -815,23 +954,21 @@ var CGUI = function()
   mFxTrack.toHTML = function(value) {
     var isCmd = value[0] >= 0;
     if (isCmd)
-      return toHex(value[0],2) + ":" + toHex(value[1],2);
+      return toHex(value[0]+1,2) + ":" + toHex(value[1],2);
     else
       return ":";
   };
-
-  mFxTrack.getElementName = function(col,row) {
-    return "fxr" + row;
-  };
-
-  mFxTrack.getScrollElementName = function(row) {
-    return "fxr" + row;
-  };
-
-  mFxTrack.scrollBar = "fxtrack";   
   
   mFxTrack.cursorMove.add(function (col,row) {
     updateInstrument();
+  });
+  
+  mFxTrack.getBeatDistance = function() {
+    return getBeatDistance();
+  };
+
+  mFxTrack.mouseDown.add(function() {
+    setEditMode(EDIT_FXTRACK);
   });
 
   //--------------------------------------------------------------------------
@@ -910,14 +1047,6 @@ var CGUI = function()
   //--------------------------------------------------------------------------
   // Song import/export functions
   //--------------------------------------------------------------------------
-
-  var calcSamplesPerRow = function (bpm) {
-    return Math.round((60 * 44100 / 4) / bpm);
-  };
-
-  var getBPM = function () {
-    return Math.round((60 * 44100 / 4) / mSong.getRowLength());
-  };
 
   // Instrument property indices
   var OSC1_WAVEFORM = 0,
@@ -999,7 +1128,7 @@ var CGUI = function()
     var song = {}, i, j, k, instr, col;
 
     // Row length
-    song.rowLen = calcSamplesPerRow(120);
+    song.rowLen = bpmToSamplesPerRow(120);
   
     // Last pattern to play
     song.endPattern = 0;
@@ -1892,20 +2021,7 @@ var CGUI = function()
       } while (o = o.offsetParent);
     }
     return [left, top];
-  };
-
-  var getEventElement = function (e)
-  {
-    var o = null;
-    if (!e) var e = window.event;
-    if (e.target)
-      o = e.target;
-    else if (e.srcElement)
-      o = e.srcElement;
-    if (o.nodeType == 3) // defeat Safari bug
-      o = o.parentNode;
-    return o;
-  };
+  }; 
 
   var getMousePos = function (e, rel)
   {
@@ -1959,11 +2075,6 @@ var CGUI = function()
       updateSongSpeed();
       updatePatternLength();
     }
-  };
-
-  var updateSongInfo = function() {
-    document.getElementById("bpm").value = getBPM();
-    document.getElementById("rpp").value = mSong.getPatternLength();
   };
 
   var toHex = function (num, count) {
@@ -2087,18 +2198,17 @@ var CGUI = function()
 
   var updateSongSpeed = function () {
     // Determine song speed
-    var bpm = parseInt(document.getElementById("bpm").value);
-    if (bpm && (bpm >= 10) && (bpm <= 1000)) {
-      mSong.setRowLength(calcSamplesPerRow(bpm));      
-    }
+    var element = document.getElementById("bpm");
+    var bpm = parseInt(element.value);
+    mSong.setBpm(bpm);
+    element.value = mSong.getBpm();      
   };
 
   var updatePatternLength = function () {
-    var rpp = parseInt(document.getElementById("rpp").value);
-    if (rpp && (rpp >= 1) && (rpp <= 256)) {
-      // Update the pattern length of the song data
-      mSong.setPatternLength(rpp);
-    }
+    var element = document.getElementById("rpp");
+    var rpp = parseInt(element.value);    
+    mSong.setPatternLength(rpp);              
+    element.value = mSong.getPatternLength();
   };
 
   var showDialog = function () {
@@ -2699,41 +2809,17 @@ var CGUI = function()
     var seqPos = Math.floor(n / mSong.getPatternLength()) + mFollowerFirstRow;
     var patPos = n % mSong.getPatternLength();
 
-    // Have we stepped?
-    var newSeqPos = (seqPos != mSeq.row());
-    var newPatPos = newSeqPos || (patPos != mPattern.row());
-
-    // Update the sequencer
-    if (newSeqPos) {
-      if (seqPos >= 0) {
-        mSeq.setCursor(mSeq.col(),seqPos,true);        
-      }
-      for (var i = 0; i < MAX_SONG_ROWS; ++i) {
-        var o = document.getElementById("spr" + i);
-        o.className = (i == seqPos ? "playpos" : "");
-      }
-    }
-
-    // Update the pattern
-    if (newPatPos) {
-      if (patPos >= 0) {
-        mPattern.setCursor(mPattern.col(),patPos);
-        mFxTrack.setCursor(mFxTrack.col(),patPos);
-      }
-      for (var i = 0; i < mSong.getPatternLength(); ++i) {
-        var o = document.getElementById("ppr" + i);
-        o.className = (i == patPos ? "playpos" : "");
-      }
-    }
+    mSeq.setCursor(mSeq.col(),seqPos,true);        
+    mSeq.setHighlightRow(mSeq.row());
+    mPattern.setCursor(mPattern.col(),patPos);
+    mFxTrack.setCursor(mFxTrack.col(),patPos);
+    mPattern.setHighlightRow(patPos);
 
     // Player graphics
     redrawPlayerGfx(t);
   };
 
   var startFollower = function () {
-    // Update the sequencer selection
-    mSeq.setCursor(mSeq.col(),mFollowerFirstRow,true);    
-
     // Start the follower
     mFollowerActive = true;
     mFollowerTimerID = setInterval(updateFollower, 16);
@@ -2749,13 +2835,8 @@ var CGUI = function()
         mFollowerTimerID = -1;
       }
 
-      // Clear the follower markers
-      for (var i = 0; i < MAX_SONG_ROWS; ++i) {
-        document.getElementById("spr" + i).className = "";
-      }
-      for (var i = 0; i < mSong.getPatternLength(); ++i) {
-        document.getElementById("ppr" + i).className = "";
-      }
+      mSeq.setHighlightRow(-1);
+      mPattern.setHighlightRow(-1);
 
       // Clear player gfx
       redrawPlayerGfx(-1);
@@ -2930,35 +3011,19 @@ var CGUI = function()
     }
   };
 
-  var bpmFocus = function (e) {
+  var setEditModeNone = function (e) {
     setEditMode(EDIT_NONE);
     return true;
   };
 
-  var rppFocus = function (e) {
-    setEditMode(EDIT_NONE);
-    return true;
-  };
-
-  var instrPresetFocus = function (e) {
-    setEditMode(EDIT_NONE);
-    return true;
-  };
-
-  var instrCopyMouseDown = function (e) {
-    if (!e) var e = window.event;
-    e.preventDefault();
-    
+  var instrCopyMouseDown = preventDefault(function (e) {
     mInstrCopyBuffer = deepCopy(mSong.getInstrument(mSeq.col()));    
-  };
+  });
 
-  var instrPasteMouseDown = function (e) {
-    if (!e) var e = window.event;
-    e.preventDefault();
-    
+  var instrPasteMouseDown = preventDefault(function (e) {
     if (mInstrCopyBuffer.length > 0)
       mSong.setInstrument(mSeq.col(),mInstrCopyBuffer);          
-  };
+  });
   
   var instrSaveMouseDown = function () {
     var instrI = mSong.getInstrument(mSeq.col());   
@@ -2968,8 +3033,7 @@ var CGUI = function()
     return false;
   };
 
-  var boxMouseDown = function (e) {
-    if (!e) var e = window.event;    
+  var boxMouseDown = preventDefault(function (e) {
     var o = getEventElement(e);
 
     // Check which instrument parameter was changed
@@ -2990,11 +3054,10 @@ var CGUI = function()
         mFxTrack.setCurrent([fxCmd,fxValue]);          
       else
         mSong.setInstrumentProperty(mSeq.col(),fxCmd,fxValue);
-    }
-    e.preventDefault();    
-  };
+    }    
+  });
 
-  var osc1WaveMouseDown = function (e) {
+  var osc1WaveMouseDown = preventDefault(function (e) {
     if (!e) var e = window.event;
     var o = getEventElement(e);
     var wave = 0;
@@ -3005,12 +3068,10 @@ var CGUI = function()
     if (mEditMode == EDIT_FXTRACK)
       mFxTrack.setCurrent([OSC1_WAVEFORM,wave]);
     else    
-      mSong.setInstrumentProperty(mSeq.col(),OSC1_WAVEFORM,wave);
-    e.preventDefault();   
-  };
+      mSong.setInstrumentProperty(mSeq.col(),OSC1_WAVEFORM,wave);    
+  });
 
-  var osc2WaveMouseDown = function (e) {
-    if (!e) var e = window.event;   
+  var osc2WaveMouseDown = preventDefault(function (e) {    
     var o = getEventElement(e);
     var wave = 0;
     if (o.id === "osc2_wave_sin") wave = 0;
@@ -3020,12 +3081,10 @@ var CGUI = function()
     if (mEditMode == EDIT_FXTRACK)
       mFxTrack.setCurrent([OSC2_WAVEFORM + 1,wave]);   
     else   
-      mSong.setInstrumentProperty(mSeq.col(),OSC2_WAVEFORM,wave);
-    e.preventDefault();   
-  };
+      mSong.setInstrumentProperty(mSeq.col(),OSC2_WAVEFORM,wave);    
+  });
 
-  var lfoWaveMouseDown = function (e) {
-    if (!e) var e = window.event;
+  var lfoWaveMouseDown = preventDefault(function (e) {
     var o = getEventElement(e);
     var wave = 0;
     if (o.id === "lfo_wave_sin") wave = 0;
@@ -3035,11 +3094,10 @@ var CGUI = function()
     if (mEditMode == EDIT_FXTRACK)
       mFxTrack.setCurrent([LFO_WAVEFORM + 1,wave]);
     else
-      mSong.setInstrumentProperty(mSeq.col(),LFO_WAVEFORM,wave);    
-    e.preventDefault();   
-  };
+      mSong.setInstrumentProperty(mSeq.col(),LFO_WAVEFORM,wave);        
+  });
 
-  var fxFiltMouseDown = function (e) {
+  var fxFiltMouseDown = preventDefault(function (e) {
     if (!e) var e = window.event;    
     var o = getEventElement(e);
     var filt = 2;
@@ -3049,33 +3107,24 @@ var CGUI = function()
     if (mEditMode == EDIT_FXTRACK)
       mFxTrack.setCurrent([FX_FILTER + 1,filt]);     
     else   
-      mSong.setInstrumentProperty(mSeq.col(),FX_FILTER,filt);   
-    e.preventDefault();    
-  };
+      mSong.setInstrumentProperty(mSeq.col(),FX_FILTER,filt);      
+  });
 
-  var octaveUp = function (e)
-  {
-    if (!e) var e = window.event;
-    e.preventDefault();
-
+  var octaveUp = preventDefault(function (e) {    
     if (mKeyboardOctave < 8)
     {
       mKeyboardOctave++;
       document.getElementById("keyboardOctave").innerHTML = "" + mKeyboardOctave;
     }
-  };
+  });
 
-  var octaveDown = function (e)
-  {
-    if (!e) var e = window.event;
-    e.preventDefault();
-
+  var octaveDown = preventDefault(function (e){
     if (mKeyboardOctave > 1)
     {
       mKeyboardOctave--;
       document.getElementById("keyboardOctave").innerHTML = "" + mKeyboardOctave;
     }
-  };
+  });
 
   var selectPreset = function (e)
   {
@@ -3136,141 +3185,13 @@ var CGUI = function()
     }
   };
 
-  var getCellCoord = function (element)
-  {
-    var rowSplit = element.id.indexOf('r', 2);
-    return {
-      col: parseInt(element.id.slice(2, rowSplit)),
-      row: parseInt(element.id.slice(rowSplit + 1))
-    };
-  };
-
-  var fxTrackMouseDown = function (e)
-  {
-    if (!e) var e = window.event;
-    e.preventDefault();
-
-    if (!mFollowerActive)
-    {
-      var o = getEventElement(e);
-      mFxTrack.setCursor(0,getCellCoord(o).row);
-      mSelectingFxRange = true;
-    }
-    setEditMode(EDIT_FXTRACK);
-  };
-
-  var fxTrackMouseOver = function (e)
-  {
-    if (mSelectingFxRange)
-    {
-      if (!e) var e = window.event;
-      var o = getEventElement(e);
-      mFxTrack.setSelectionCorner(0,getCellCoord(o).row);
-      e.preventDefault();
-    }
-  };
-
-  var fxTrackMouseUp = function (e)
-  {
-    if (mSelectingFxRange)
-    {
-      if (!e) var e = window.event;
-      var o = getEventElement(e);
-      mFxTrack.setSelectionCorner(0,getCellCoord(o).row);
-      mSelectingFxRange = false;
-      e.preventDefault();
-    }
-  };
-
-  var patternMouseDown = function (e)
-  {
-    if (!e) var e = window.event;
-    e.preventDefault();
-
-    if (!mFollowerActive)
-    {
-      var o = getEventElement(e);
-      var coord = getCellCoord(o);
-      mPattern.setCursor(coord.col, coord.row);
-      mSelectingPatternRange = true;
-    }
-    setEditMode(EDIT_PATTERN);
-  };
-
-  var patternMouseOver = function (e)
-  {
-    if (mSelectingPatternRange)
-    {
-      if (!e) var e = window.event;
-      var o = getEventElement(e);
-      var coord = getCellCoord(o);
-      mPattern.setSelectionCorner(coord.col, coord.row);
-      e.preventDefault();
-    }
-  };
-
-  var patternMouseUp = function (e)
-  {
-    if (mSelectingPatternRange)
-    {
-      if (!e) var e = window.event;
-      var o = getEventElement(e);
-      var coord = getCellCoord(o);
-      mPattern.setSelectionCorner(coord.col, coord.row);
-      mSelectingPatternRange = false;
-      e.preventDefault();
-    }
-  };
-
-  var sequencerMouseDown = function (e)
-  {
-    if (!e) var e = window.event;
-    var o = getEventElement(e);
-    var coord = getCellCoord(o);
-    var col = coord.col;
-    var row = mFollowerActive ? mSeq.row() : coord.row;
-    var newChannel = col != mSeq.col();
-    mSeq.setCursor(col, row);
-    if (!mFollowerActive)
-      mSelectingSeqRange = true;
-    setEditMode(EDIT_SEQUENCE);
-    e.preventDefault();
-  };
-
-  var sequencerMouseOver = function (e)
-  {
-    if (mSelectingSeqRange)
-    {
-      if (!e) var e = window.event;
-      var o = getEventElement(e);
-      var coord = getCellCoord(o);
-      mSeq.setSelectionCorner(coord.col, coord.row);
-      e.preventDefault();
-    }
-  };
-
-  var sequencerMouseUp = function (e)
-  {
-    if (mSelectingSeqRange)
-    {
-      if (!e) var e = window.event;
-      var o = getEventElement(e);
-      var coord = getCellCoord(o); 
-      mSeq.setSelectionCorner(coord.col, coord.row);
-      mSelectingSeqRange = false;
-      e.preventDefault();
-    }
-  };
-
   var mActiveSlider = null;
 
-  var sliderMouseDown = function (e)
-  {    
-    if (!e) var e = window.event;
+  var sliderMouseDown = preventDefault(function (e)
+  {        
     mActiveSlider = getEventElement(e);
-    unfocusHTMLInputElements();
-    e.preventDefault();   
-  };
+    setEditMode(EDIT_NONE);
+  });
 
   var mouseMove = function (e) {
     if (!e) var e = window.event;
@@ -3728,44 +3649,10 @@ var CGUI = function()
 
     // Set up the master key event handler
     document.onkeydown = null;
-  };
-
-  var buildSequencerTable = function () {
-    var table = document.getElementById("sequencer-table");
-    var tr, th, td;
-    for (var row = 0; row < MAX_SONG_ROWS; row++) {
-      tr = document.createElement("tr");
-      if (row % 4 === 0)
-        tr.className = "beat";
-      th = document.createElement("th");
-      th.id = "spr" + row;
-      th.textContent = "" + row;
-      tr.appendChild(th);
-      for (col = 0; col < MAX_CHANNELS; col++) {
-        td = document.createElement("td");
-        td.id = "sc" + col + "r" + row;
-        td.textContent = " ";
-        td.addEventListener("mousedown", sequencerMouseDown, false);
-        td.addEventListener("mouseover", sequencerMouseOver, false);
-        td.addEventListener("mouseup", sequencerMouseUp, false);
-        tr.appendChild(td);
-      }
-      table.appendChild(tr);
-    }
-  };
-
-  var getCurrentBeatDistance = function (table) {
-    var beatDistance = 1;
-    while (beatDistance < table.children.length) {
-      if (table.children[beatDistance].className === "beat")
-        break;
-      beatDistance++;
-    }
-    return beatDistance;
-  };
+  };  
 
   var getBeatDistance = function () {
-    var bpm = getBPM();
+    var bpm = mSong.getBpm();
     var beatDistance = 4;
     var patternLen = mSong.getPatternLength();
     if (patternLen % 3 === 0)
@@ -3780,58 +3667,6 @@ var CGUI = function()
       beatDistance *= 2;
 
     return beatDistance;
-  };
-
-  var buildPatternTable = function () {
-    var beatDistance = getBeatDistance();
-    var table = document.getElementById("pattern-table");
-    if (table.children.length === mSong.getPatternLength() && getCurrentBeatDistance(table) === beatDistance)
-      return;
-    while (table.firstChild)
-      table.removeChild(table.firstChild);
-    var tr, th, td;
-    for (var row = 0; row < mSong.getPatternLength(); row++) {
-      tr = document.createElement("tr");
-      if (row % beatDistance === 0)
-        tr.className = "beat";
-      th = document.createElement("th");
-      th.id = "ppr" + row;
-      th.textContent = "" + row;
-      tr.appendChild(th);
-      for (col = 0; col < 4; col++) {
-        td = document.createElement("td");
-        td.id = "pc" + col + "r" + row;
-        td.textContent = " ";
-        td.addEventListener("mousedown", patternMouseDown, false);
-        td.addEventListener("mouseover", patternMouseOver, false);
-        td.addEventListener("mouseup", patternMouseUp, false);
-        tr.appendChild(td);
-      }
-      table.appendChild(tr);
-    }
-  };
-
-  var buildFxTable = function () {
-    var beatDistance = getBeatDistance();
-    var table = document.getElementById("fxtrack-table");
-    if (table.children.length === mSong.getPatternLength() && getCurrentBeatDistance(table) === beatDistance)
-      return;
-    while (table.firstChild)
-      table.removeChild(table.firstChild);
-    var tr, td;
-    for (var row = 0; row < mSong.getPatternLength(); row++) {
-      tr = document.createElement("tr");
-      if (row % beatDistance === 0)
-        tr.className = "beat";
-      td = document.createElement("td");
-      td.id = "fxr" + row;
-      td.textContent = String.fromCharCode(160);  // &nbsp;
-      td.addEventListener("mousedown", fxTrackMouseDown, false);
-      td.addEventListener("mouseover", fxTrackMouseOver, false);
-      td.addEventListener("mouseup", fxTrackMouseUp, false);
-      tr.appendChild(td);
-      table.appendChild(tr);
-    }
   };
 
   var canPlayDataUri = function () {
@@ -3912,9 +3747,6 @@ var CGUI = function()
     mPlayGfxLedOffImg.src = "gui/led-off.png";
     mPlayGfxLedOnImg.src = "gui/led-on.png";  
 
-    // Build the UI tables
-    buildSequencerTable();
-
     // Set up GUI elements
     document.getElementById("osc1_vol").sliderProps = { min: 0, max: 255 };
     document.getElementById("osc1_semi").sliderProps = { min: 92, max: 164 };
@@ -3992,8 +3824,9 @@ var CGUI = function()
     document.getElementById("playRange").onmousedown = playRange;
     document.getElementById("stopPlaying").onmousedown = stopPlaying;
     document.getElementById("about").onmousedown = about;
-    document.getElementById("bpm").onfocus = bpmFocus;
-    document.getElementById("rpp").onfocus = rppFocus;
+    document.getElementById("bpm").onfocus = setEditModeNone;
+    document.getElementById("rpp").onfocus = setEditModeNone;
+    document.getElementById("rpp").onblur = updatePatternLength;
 
     document.getElementById("sequencerCopy").onmousedown = preventDefault(mSeq.copy);
     document.getElementById("sequencerPaste").onmousedown = preventDefault(mSeq.paste);
@@ -4038,7 +3871,7 @@ var CGUI = function()
     document.getElementById("fxCopy").onmousedown = preventDefault(mFxTrack.copy);
     document.getElementById("fxPaste").onmousedown = preventDefault(mFxTrack.paste);
 
-    document.getElementById("instrPreset").onfocus = instrPresetFocus;
+    document.getElementById("instrPreset").onfocus = setEditModeNone;
     document.getElementById("instrPreset").onchange = selectPreset;
     document.getElementById("instrPreset").onkeydown = presetOnKeyDown;
     
