@@ -2070,11 +2070,7 @@ var CGUI = function()
 
     // Unfocus any focused input elements
     if (mEditMode != EDIT_NONE)
-    {
-      unfocusHTMLInputElements();
-      updateSongSpeed();
-      updatePatternLength();
-    }
+      unfocusHTMLInputElements();      
   };
 
   var toHex = function (num, count) {
@@ -2259,7 +2255,7 @@ var CGUI = function()
           return false;
       }
       mSong.setSong(song);
-      mSongUnmodified = deepCopy(mSong); // store the song before any modifications´
+      mSongUnmodified = deepCopy(song); // store the song before any modifications´
       return true;
     }
     return false;
@@ -2514,7 +2510,7 @@ var CGUI = function()
     mSeq.setCursor(0, 0);
     mFxTrack.setCursor(0, 0);
     
-    mSongUnmodified = deepCopy(mSong); // store the song before any modifications   
+    mSongUnmodified = deepCopy(mSong.getSong()); // store the song before any modifications   
     return false;
   };
 
@@ -3033,6 +3029,14 @@ var CGUI = function()
     return false;
   };
 
+  var updateFxOrInstr = function(fxCmd,fxValue)
+  {
+    if (mEditMode == EDIT_FXTRACK)
+      mFxTrack.setCurrent([fxCmd,fxValue]);          
+    else
+      mSong.setInstrumentProperty(mSeq.col(),fxCmd,fxValue);
+  };
+
   var boxMouseDown = preventDefault(function (e) {
     var o = getEventElement(e);
 
@@ -3048,14 +3052,10 @@ var CGUI = function()
     // Update the instrument (toggle boolean)
     var fxValue;
     if (fxCmd >= 0) {
-      fxValue = mSong.getInstrumentProperty(mSeq.col(),fxCmd) ? 0 : 1;
-    
-      if (mEditMode == EDIT_FXTRACK)
-        mFxTrack.setCurrent([fxCmd,fxValue]);          
-      else
-        mSong.setInstrumentProperty(mSeq.col(),fxCmd,fxValue);
+      fxValue = mSong.getInstrumentProperty(mSeq.col(),fxCmd) ? 0 : 1;   
+      updateFxOrInstr(fxCmd,fxValue);
     }    
-  });
+  });  
 
   var osc1WaveMouseDown = preventDefault(function (e) {
     if (!e) var e = window.event;
@@ -3065,10 +3065,7 @@ var CGUI = function()
     else if (o.id === "osc1_wave_sqr") wave = 1;
     else if (o.id === "osc1_wave_saw") wave = 2;
     else if (o.id === "osc1_wave_tri") wave = 3;
-    if (mEditMode == EDIT_FXTRACK)
-      mFxTrack.setCurrent([OSC1_WAVEFORM,wave]);
-    else    
-      mSong.setInstrumentProperty(mSeq.col(),OSC1_WAVEFORM,wave);    
+    updateFxOrInstr(OSC1_WAVEFORM,wave);   
   });
 
   var osc2WaveMouseDown = preventDefault(function (e) {    
@@ -3078,10 +3075,7 @@ var CGUI = function()
     else if (o.id === "osc2_wave_sqr") wave = 1;
     else if (o.id === "osc2_wave_saw") wave = 2;
     else if (o.id === "osc2_wave_tri") wave = 3;
-    if (mEditMode == EDIT_FXTRACK)
-      mFxTrack.setCurrent([OSC2_WAVEFORM + 1,wave]);   
-    else   
-      mSong.setInstrumentProperty(mSeq.col(),OSC2_WAVEFORM,wave);    
+    updateFxOrInstr(OSC2_WAVEFORM,wave);    
   });
 
   var lfoWaveMouseDown = preventDefault(function (e) {
@@ -3091,10 +3085,7 @@ var CGUI = function()
     else if (o.id === "lfo_wave_sqr") wave = 1;
     else if (o.id === "lfo_wave_saw") wave = 2;
     else if (o.id === "lfo_wave_tri") wave = 3;
-    if (mEditMode == EDIT_FXTRACK)
-      mFxTrack.setCurrent([LFO_WAVEFORM + 1,wave]);
-    else
-      mSong.setInstrumentProperty(mSeq.col(),LFO_WAVEFORM,wave);        
+    updateFxOrInstr(LFO_WAVEFORM,wave);
   });
 
   var fxFiltMouseDown = preventDefault(function (e) {
@@ -3104,10 +3095,7 @@ var CGUI = function()
     if (o.id === "fx_filt_hp") filt = 1;
     else if (o.id === "fx_filt_lp") filt = 2;
     else if (o.id === "fx_filt_bp") filt = 3;
-    if (mEditMode == EDIT_FXTRACK)
-      mFxTrack.setCurrent([FX_FILTER + 1,filt]);     
-    else   
-      mSong.setInstrumentProperty(mSeq.col(),FX_FILTER,filt);      
+    updateFxOrInstr(FX_FILTER,filt); 
   });
 
   var octaveUp = preventDefault(function (e) {    
@@ -3190,7 +3178,7 @@ var CGUI = function()
   var sliderMouseDown = preventDefault(function (e)
   {        
     mActiveSlider = getEventElement(e);
-    setEditMode(EDIT_NONE);
+    unfocusHTMLInputElements();
   });
 
   var mouseMove = function (e) {
@@ -3250,14 +3238,7 @@ var CGUI = function()
           x = (instr[ARP_CHORD] & 240) | x;
       }
 
-      if (mEditMode == EDIT_FXTRACK) {
-        // Update the effect command in the FX track
-        mFxTrack.setCurrent([cmdNo,x]);
-      } else {
-        // Update the instrument property
-        if (cmdNo >= 0)
-          mSong.setInstrumentProperty(mSeq.col(),cmdNo,x);
-      }
+      updateFxOrInstr(cmdNo,x);
 
       e.preventDefault();
     }
@@ -3492,10 +3473,7 @@ var CGUI = function()
 
       case 13:  // ENTER / RETURN
         if (editingBpmRpp) {
-          updateSongSpeed();
-          updatePatternLength();
-          document.getElementById("bpm").blur();
-          document.getElementById("rpp").blur();
+          unfocusHTMLInputElements();
         } else if (mEditMode == EDIT_SEQUENCE)
           fillSequenceRange();
         else if (mEditMode == EDIT_FXTRACK)
@@ -3808,7 +3786,7 @@ var CGUI = function()
     var songData = getURLSongData(mGETParams && mGETParams.data && mGETParams.data[0]);
     var song = songData ? binToSong(songData) : null;
     mSong.setSong(song ? song : makeNewSong());
-    mSongUnmodified = deepCopy(mSong);    
+    mSongUnmodified = deepCopy(mSong.getSong());    
 
     // Initialize the song
     setEditMode(EDIT_PATTERN);
