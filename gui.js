@@ -3067,7 +3067,6 @@ var CGUI = function()
   }
 
   var fxFiltMouseDown = preventDefault(function (e) {
-    if (!e) var e = window.event;    
     var o = getEventElement(e);
     var filt = 2;
     if (o.id === "fx_filt_hp") filt = 1;
